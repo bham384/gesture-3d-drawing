@@ -1,319 +1,219 @@
 /**
- * 3D Renderer Module
- * Handles Three.js 3D scene, rendering, and stroke drawing
+ * Gesture Detector Module
+ * Handles hand detection and gesture recognition using MediaPipe
  */
 
-class ThreeDRenderer {
-    constructor(canvasElement) {
-        this.canvas = canvasElement;
-        this.scene = null;
+class GestureDetector {
+    constructor() {
+        this.hands = null;
         this.camera = null;
-        this.renderer = null;
-        this.strokes = [];
-        this.currentStroke = null;
-        this.brushColor = new THREE.Color(0xff0000);
-        this.brushSize = 0.5;
-        this.autoRotate = true;
-        this.rotationSpeed = 0.01;
-        this.group = null;
-        this.ambientLight = null;
-        this.directionalLight = null;
-
-        this.initialize();
-    }
-
-    /**
-     * Initialize Three.js scene
-     */
-    initialize() {
-        // Scene
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x1e3c72);
-        this.scene.fog = new THREE.Fog(0x1e3c72, 1000, 2000);
-
-        // Camera
-        this.camera = new THREE.PerspectiveCamera(
-            75,
-            this.canvas.clientWidth / this.canvas.clientHeight,
-            0.1,
-            1000
-        );
-        this.camera.position.z = 10;
-
-        // Renderer
-        this.renderer = new THREE.WebGLRenderer({
-            canvas: this.canvas,
-            antialias: true,
-            alpha: true
-        });
-        this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFShadowShadowMap;
-
-        // Group for all drawing objects
-        this.group = new THREE.Group();
-        this.scene.add(this.group);
-
-        // Lighting
-        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        this.scene.add(this.ambientLight);
-
-        this.directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        this.directionalLight.position.set(10, 10, 10);
-        this.directionalLight.castShadow = true;
-        this.directionalLight.shadow.mapSize.width = 2048;
-        this.directionalLight.shadow.mapSize.height = 2048;
-        this.scene.add(this.directionalLight);
-
-        // Add grid helper
-        const gridHelper = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
-        gridHelper.position.y = -5;
-        this.scene.add(gridHelper);
-
-        // Add axes helper
-        const axesHelper = new THREE.AxesHelper(5);
-        this.group.add(axesHelper);
-
-        // Handle window resize
-        window.addEventListener('resize', () => this.onWindowResize());
-
-        // Start render loop
-        this.render();
-    }
-
-    /**
-     * Start a new stroke
-     */
-    startStroke(position, color, size) {
-        this.currentStroke = {
-            points: [position],
-            color: color || this.brushColor,
-            size: size || this.brushSize,
-            mesh: null
+        this.isInitialized = false;
+        this.isDetecting = false;
+        this.handLandmarks = null;
+        this.gestures = {
+            indexUp: false,
+            fistClosed: false,
+            thumbUp: false,
+            pinch: false,
+            openPalm: false,
+            indexMovement: null
         };
     }
 
-    /**
-     * Add point to current stroke
-     */
-    addPointToStroke(position) {
-        if (!this.currentStroke) {
-            this.startStroke(position);
-        }
+    async initialize(videoElement, canvasElement) {
+        try {
+            this.hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
 
-        this.currentStroke.points.push(position);
+            this.hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            this.hands.onResults((results) => this.onHandsResults(results));
+
+            this.camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await this.hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+
+            this.canvasElement = canvasElement;
+            this.videoElement = videoElement;
+            this.isInitialized = true;
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize gesture detector:', error);
+            return false;
+        }
     }
 
-    /**
-     * End current stroke and create 3D mesh
-     */
-    endStroke() {
-        if (!this.currentStroke || this.currentStroke.points.length < 2) {
-            this.currentStroke = null;
+    async start() {
+        if (!this.isInitialized) {
+            console.error('Gesture detector not initialized');
+            return false;
+        }
+
+        try {
+            await this.camera.initialize();
+            this.isDetecting = true;
+            return true;
+        } catch (error) {
+            console.error('Failed to start gesture detection:', error);
+            return false;
+        }
+    }
+
+    stop() {
+        if (this.camera) {
+            this.camera.stop();
+        }
+        this.isDetecting = false;
+    }
+
+    onHandsResults(results) {
+        const ctx = this.canvasElement.getContext('2d');
+        this.canvasElement.width = this.videoElement.videoWidth || 640;
+        this.canvasElement.height = this.videoElement.videoHeight || 480;
+        ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            this.handLandmarks = results.multiHandLandmarks[0];
+            this.updateGestures();
+            this.drawHand(ctx, this.handLandmarks);
+        } else {
+            this.handLandmarks = null;
+            this.gestures = {
+                indexUp: false,
+                fistClosed: false,
+                thumbUp: false,
+                pinch: false,
+                openPalm: false,
+                indexMovement: null
+            };
+        }
+    }
+
+    updateGestures() {
+        if (!this.handLandmarks || this.handLandmarks.length < 21) {
             return;
         }
 
-        // Create custom geometry for smooth 3D drawing
-        const geometry = new THREE.BufferGeometry();
-        const positions = [];
-        const colors = [];
-        const tubePoints = this.currentStroke.points;
+        const landmarks = this.handLandmarks;
+        const indexTip = landmarks[8];
+        const indexPIP = landmarks[6];
+        const middleTip = landmarks[12];
+        const ringTip = landmarks[16];
+        const pinkyTip = landmarks[20];
+        const thumbTip = landmarks[4];
+        const thumbIP = landmarks[3];
 
-        for (let i = 0; i < tubePoints.length - 1; i++) {
-            const p1 = tubePoints[i];
-            const p2 = tubePoints[i + 1];
+        const indexExtended = indexTip.y < indexPIP.y;
+        const middleExtended = middleTip.y < landmarks[10].y;
+        const ringExtended = ringTip.y < landmarks[14].y;
+        const pinkyExtended = pinkyTip.y < landmarks[18].y;
 
-            // Create cylinder between points
-            const segments = 8;
-            const radius = this.currentStroke.size * 0.05;
+        this.gestures.indexUp = indexExtended;
+        this.gestures.fistClosed = !indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+        this.gestures.thumbUp = thumbTip.y < thumbIP.y;
+        this.gestures.openPalm = indexExtended && middleExtended && ringExtended && pinkyExtended;
 
-            for (let j = 0; j < segments; j++) {
-                const angle1 = (j / segments) * Math.PI * 2;
-                const angle2 = ((j + 1) / segments) * Math.PI * 2;
+        const indexThumbDistance = this.distance(thumbTip, indexTip);
+        this.gestures.pinch = indexThumbDistance < 0.06 && indexExtended;
 
-                // Calculate normals for better looking tube
-                const offset1_1 = {
-                    x: Math.cos(angle1) * radius,
-                    y: Math.sin(angle1) * radius,
-                    z: 0
-                };
-                const offset1_2 = {
-                    x: Math.cos(angle2) * radius,
-                    y: Math.sin(angle2) * radius,
-                    z: 0
-                };
-
-                // First triangle
-                positions.push(p1.x, p1.y, p1.z);
-                positions.push(p1.x + offset1_1.x, p1.y + offset1_1.y, p1.z + offset1_1.z);
-                positions.push(p1.x + offset1_2.x, p1.y + offset1_2.y, p1.z + offset1_2.z);
-
-                // Second triangle
-                positions.push(p2.x, p2.y, p2.z);
-                positions.push(p1.x + offset1_2.x, p1.y + offset1_2.y, p1.z + offset1_2.z);
-                positions.push(p2.x + offset1_2.x, p2.y + offset1_2.y, p2.z + offset1_2.z);
-
-                // Add colors
-                for (let k = 0; k < 6; k++) {
-                    colors.push(this.currentStroke.color.r);
-                    colors.push(this.currentStroke.color.g);
-                    colors.push(this.currentStroke.color.b);
-                }
-            }
+        if (indexExtended) {
+            this.gestures.indexMovement = {
+                x: indexTip.x,
+                y: indexTip.y,
+                z: indexTip.z
+            };
         }
-
-        if (positions.length > 0) {
-            geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-            geometry.computeVertexNormals();
-
-            const material = new THREE.MeshPhongMaterial({
-                vertexColors: true,
-                shininess: 100,
-                emissive: 0x000000,
-                wireframe: false
-            });
-
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-
-            this.group.add(mesh);
-            this.strokes.push({
-                mesh: mesh,
-                points: this.currentStroke.points,
-                color: this.currentStroke.color,
-                size: this.currentStroke.size
-            });
-        }
-
-        this.currentStroke = null;
     }
 
-    /**
-     * Clear all strokes
-     */
-    clear() {
-        this.strokes.forEach(stroke => {
-            this.group.remove(stroke.mesh);
-            stroke.mesh.geometry.dispose();
-            stroke.mesh.material.dispose();
+    distance(a, b) {
+        return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    }
+
+    drawHand(ctx, landmarks) {
+        const connections = [
+            [0, 1], [1, 2], [2, 3], [3, 4],
+            [0, 5], [5, 6], [6, 7], [7, 8],
+            [0, 9], [9, 10], [10, 11], [11, 12],
+            [0, 13], [13, 14], [14, 15], [15, 16],
+            [0, 17], [17, 18], [18, 19], [19, 20]
+        ];
+
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 2;
+
+        connections.forEach(([start, end]) => {
+            const p1 = landmarks[start];
+            const p2 = landmarks[end];
+            ctx.beginPath();
+            ctx.moveTo(p1.x * this.canvasElement.width, p1.y * this.canvasElement.height);
+            ctx.lineTo(p2.x * this.canvasElement.width, p2.y * this.canvasElement.height);
+            ctx.stroke();
         });
-        this.strokes = [];
-        this.currentStroke = null;
-    }
 
-    /**
-     * Set brush color
-     */
-    setBrushColor(color) {
-        this.brushColor = new THREE.Color(color);
-    }
+        ctx.fillStyle = '#FF0000';
+        landmarks.forEach((landmark, index) => {
+            ctx.beginPath();
+            ctx.arc(
+                landmark.x * this.canvasElement.width,
+                landmark.y * this.canvasElement.height,
+                5,
+                0,
+                2 * Math.PI
+            );
+            ctx.fill();
 
-    /**
-     * Set brush size
-     */
-    setBrushSize(size) {
-        this.brushSize = size;
-    }
-
-    /**
-     * Set auto rotation
-     */
-    setAutoRotate(enabled) {
-        this.autoRotate = enabled;
-    }
-
-    /**
-     * Set rotation speed
-     */
-    setRotationSpeed(speed) {
-        this.rotationSpeed = speed * 0.01;
-    }
-
-    /**
-     * Main render loop
-     */
-    render() {
-        requestAnimationFrame(() => this.render());
-
-        // Auto rotate
-        if (this.autoRotate) {
-            this.group.rotation.x += this.rotationSpeed * 0.5;
-            this.group.rotation.y += this.rotationSpeed;
-        }
-
-        this.renderer.render(this.scene, this.camera);
-    }
-
-    /**
-     * Handle window resize
-     */
-    onWindowResize() {
-        const width = this.canvas.clientWidth;
-        const height = this.canvas.clientHeight;
-
-        this.camera.aspect = width / height;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height);
-    }
-
-    /**
-     * Convert normalized hand coordinates to 3D world coordinates
-     */
-    handToWorldCoordinates(handPos, canvasWidth, canvasHeight) {
-        if (!handPos) return null;
-
-        // Normalize to -1 to 1 range
-        const x = (handPos.x - 0.5) * 20;
-        const y = -(handPos.y - 0.5) * 15;
-        const z = (handPos.z || 0) * 5;
-
-        return new THREE.Vector3(x, y, z);
-    }
-
-    /**
-     * Get stroke count
-     */
-    getStrokeCount() {
-        return this.strokes.length;
-    }
-
-    /**
-     * Get total vertices
-     */
-    getTotalVertices() {
-        let count = 0;
-        this.strokes.forEach(stroke => {
-            if (stroke.mesh.geometry.getAttribute('position')) {
-                count += stroke.mesh.geometry.getAttribute('position').count;
+            if (index === 8) {
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(
+                    landmark.x * this.canvasElement.width,
+                    landmark.y * this.canvasElement.height,
+                    10,
+                    0,
+                    2 * Math.PI
+                );
+                ctx.stroke();
             }
         });
-        return count;
     }
 
-    /**
-     * Export drawing as image
-     */
-    takeScreenshot() {
-        return this.canvas.toDataURL('image/png');
+    getGestures() {
+        return this.gestures;
     }
 
-    /**
-     * Export drawing as JSON
-     */
-    exportDrawing() {
+    getHandLandmarks() {
+        return this.handLandmarks;
+    }
+
+    isHandDetected() {
+        return this.handLandmarks !== null;
+    }
+
+    getIndexFingerPosition() {
+        if (!this.handLandmarks || this.handLandmarks.length < 9) {
+            return null;
+        }
+
+        const indexTip = this.handLandmarks[8];
         return {
-            timestamp: new Date().toISOString(),
-            strokes: this.strokes.map(stroke => ({
-                points: stroke.points,
-                color: stroke.color.getHexString(),
-                size: stroke.size
-            }))
+            x: indexTip.x,
+            y: indexTip.y,
+            z: indexTip.z
         };
     }
 }
 
-// Export for use
-window.ThreeDRenderer = ThreeDRenderer;
+window.GestureDetector = GestureDetector;

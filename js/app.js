@@ -1,252 +1,240 @@
 /**
- * Main Application Controller
- * Integrates gesture detection with 3D rendering
+ * 3D Renderer Module
+ * Handles Three.js 3D scene, rendering, and stroke drawing
  */
 
-class GestureDrawingApp {
-    constructor() {
-        this.gestureDetector = null;
+class ThreeDRenderer {
+    constructor(canvasElement) {
+        this.canvas = canvasElement;
+        this.scene = null;
+        this.camera = null;
         this.renderer = null;
-        this.isDrawing = false;
-        this.lastIndexPosition = null;
-        this.drawingEnabled = false;
-        this.minDrawingDistance = 0.01;
+        this.strokes = [];
+        this.currentStroke = null;
+        this.brushColor = new THREE.Color(0xff0000);
+        this.brushSize = 0.5;
+        this.autoRotate = true;
+        this.rotationSpeed = 0.01;
+        this.group = null;
 
-        this.initializeElements();
-        this.setupEventListeners();
+        this.initialize();
     }
 
-    /**
-     * Initialize DOM elements
-     */
-    initializeElements() {
-        // Buttons
-        this.startBtn = document.getElementById('startBtn');
-        this.stopBtn = document.getElementById('stopBtn');
-        this.clearBtn = document.getElementById('clearBtn');
-        this.saveBtn = document.getElementById('saveBtn');
+    initialize() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x1e3c72);
+        this.scene.fog = new THREE.Fog(0x1e3c72, 1000, 2000);
 
-        // Controls
-        this.brushSizeInput = document.getElementById('brushSize');
-        this.brushSizeValue = document.getElementById('brushSizeValue');
-        this.colorPicker = document.getElementById('colorPicker');
-        this.autoRotateCheckbox = document.getElementById('autoRotate');
-        this.rotationSpeedInput = document.getElementById('rotationSpeed');
+        this.camera = new THREE.PerspectiveCamera(
+            75,
+            this.canvas.clientWidth / this.canvas.clientHeight,
+            0.1,
+            1000
+        );
+        this.camera.position.z = 10;
 
-        // Video elements
-        this.webcamVideo = document.getElementById('webcam');
-        this.canvasOverlay = document.getElementById('canvas-overlay');
+        this.renderer = new THREE.WebGLRenderer({
+            canvas: this.canvas,
+            antialias: true,
+            alpha: true
+        });
+        this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
 
-        // 3D Canvas
-        this.canvas3D = document.getElementById('3d-canvas');
+        this.group = new THREE.Group();
+        this.scene.add(this.group);
 
-        // Stats
-        this.strokeCount = document.getElementById('strokeCount');
-        this.vertexCount = document.getElementById('vertexCount');
-        this.handIndicator = document.getElementById('handIndicator');
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        this.scene.add(ambientLight);
 
-        // Initialize detector and renderer
-        this.gestureDetector = new GestureDetector();
-        this.renderer = new ThreeDRenderer(this.canvas3D);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        directionalLight.position.set(8, 8, 10);
+        this.scene.add(directionalLight);
+
+        const gridHelper = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+        gridHelper.position.y = -5;
+        this.scene.add(gridHelper);
+
+        window.addEventListener('resize', () => this.onWindowResize());
+        this.render();
     }
 
-    /**
-     * Setup event listeners
-     */
-    setupEventListeners() {
-        // Button events
-        this.startBtn.addEventListener('click', () => this.start());
-        this.stopBtn.addEventListener('click', () => this.stop());
-        this.clearBtn.addEventListener('click', () => this.clear());
-        this.saveBtn.addEventListener('click', () => this.save());
-
-        // Control events
-        this.brushSizeInput.addEventListener('input', (e) => {
-            this.renderer.setBrushSize(parseFloat(e.target.value));
-            this.brushSizeValue.textContent = e.target.value;
-        });
-
-        this.colorPicker.addEventListener('input', (e) => {
-            this.renderer.setBrushColor(e.target.value);
-        });
-
-        this.autoRotateCheckbox.addEventListener('change', (e) => {
-            this.renderer.setAutoRotate(e.target.checked);
-        });
-
-        this.rotationSpeedInput.addEventListener('input', (e) => {
-            this.renderer.setRotationSpeed(parseFloat(e.target.value));
-        });
+    startStroke(position, color, size) {
+        this.currentStroke = {
+            points: [position],
+            color: color || this.brushColor.clone(),
+            size: size || this.brushSize,
+            type: 'stroke'
+        };
     }
 
-    /**
-     * Start gesture detection and drawing
-     */
-    async start() {
-        try {
-            // Initialize gesture detector
-            const initialized = await this.gestureDetector.initialize(
-                this.webcamVideo,
-                this.canvasOverlay
-            );
+    addPointToStroke(position) {
+        if (!this.currentStroke) {
+            this.startStroke(position);
+        }
+        this.currentStroke.points.push(position);
+    }
 
-            if (!initialized) {
-                alert('Failed to initialize camera and hand detection');
-                return;
+    endStroke() {
+        if (!this.currentStroke || this.currentStroke.points.length < 2) {
+            this.currentStroke = null;
+            return;
+        }
+
+        const points = this.currentStroke.points;
+        const curve = new THREE.CatmullRomCurve3(points);
+        const radius = this.currentStroke.size * 0.08;
+        const geometry = new THREE.TubeGeometry(curve, Math.max(points.length * 12, 60), radius, 10, false);
+        const material = new THREE.MeshStandardMaterial({
+            color: this.currentStroke.color,
+            metalness: 0.2,
+            roughness: 0.35
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        this.group.add(mesh);
+        this.strokes.push({
+            mesh,
+            type: 'stroke',
+            color: this.currentStroke.color,
+            points: points.slice(),
+            size: this.currentStroke.size
+        });
+
+        this.currentStroke = null;
+    }
+
+    eraseLastStroke() {
+        if (!this.strokes.length) return;
+        const last = this.strokes.pop();
+        if (last && last.mesh) {
+            this.group.remove(last.mesh);
+            last.mesh.geometry.dispose();
+            if (last.mesh.material) {
+                last.mesh.material.dispose();
             }
-
-            // Start detection
-            const started = await this.gestureDetector.start();
-            if (!started) {
-                alert('Failed to start hand detection');
-                return;
-            }
-
-            this.drawingEnabled = true;
-            this.startBtn.disabled = true;
-            this.stopBtn.disabled = false;
-
-            // Start monitoring gestures
-            this.monitorGestures();
-
-            console.log('✓ Hand detection started');
-        } catch (error) {
-            console.error('Error starting app:', error);
-            alert('Error: ' + error.message);
         }
     }
 
-    /**
-     * Stop gesture detection
-     */
-    stop() {
-        if (this.isDrawing) {
-            this.renderer.endStroke();
-            this.isDrawing = false;
-        }
+    addPrimitive(type, position, color) {
+        const finalColor = color || this.brushColor.clone();
+        let geometry;
+        let mesh;
 
-        this.gestureDetector.stop();
-        this.drawingEnabled = false;
-        this.startBtn.disabled = false;
-        this.stopBtn.disabled = true;
-
-        console.log('✓ Hand detection stopped');
-    }
-
-    /**
-     * Monitor hand gestures and update drawing
-     */
-    monitorGestures() {
-        if (!this.drawingEnabled) return;
-
-        const gestures = this.gestureDetector.getGestures();
-        const handDetected = this.gestureDetector.isHandDetected();
-
-        // Update hand indicator
-        if (handDetected) {
-            this.handIndicator.textContent = 'Hand Detection: ON';
-            this.handIndicator.classList.add('detected');
+        if (type === 'cube') {
+            geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
         } else {
-            this.handIndicator.textContent = 'Hand Detection: OFF';
-            this.handIndicator.classList.remove('detected');
+            geometry = new THREE.SphereGeometry(0.8, 24, 24);
         }
 
-        // Get index finger position
-        const indexPosition = this.gestureDetector.getIndexFingerPosition();
+        const material = new THREE.MeshStandardMaterial({
+            color: finalColor,
+            metalness: 0.35,
+            roughness: 0.25
+        });
 
-        if (handDetected && indexPosition && gestures.indexUp && !gestures.fistClosed) {
-            // Convert hand coordinates to world coordinates
-            const worldPos = this.renderer.handToWorldCoordinates(
-                indexPosition,
-                this.webcamVideo.videoWidth,
-                this.webcamVideo.videoHeight
-            );
+        mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(position);
+        this.group.add(mesh);
 
-            if (worldPos) {
-                if (!this.isDrawing) {
-                    // Start new stroke
-                    this.renderer.startStroke(worldPos);
-                    this.isDrawing = true;
-                    console.log('Drawing started');
-                } else {
-                    // Check if movement is significant enough
-                    if (this.lastIndexPosition) {
-                        const distance = worldPos.distanceTo(this.lastIndexPosition);
-                        if (distance > this.minDrawingDistance) {
-                            this.renderer.addPointToStroke(worldPos);
-                        }
-                    }
-                }
-
-                this.lastIndexPosition = worldPos.clone();
-            }
-        } else if (this.isDrawing) {
-            // End stroke when finger goes down or fist closes
-            this.renderer.endStroke();
-            this.isDrawing = false;
-            this.lastIndexPosition = null;
-            console.log('Drawing ended');
-        }
-
-        // Update stats
-        this.updateStats();
-
-        // Continue monitoring
-        requestAnimationFrame(() => this.monitorGestures());
+        this.strokes.push({
+            mesh,
+            type,
+            color: finalColor,
+            points: [position.clone()],
+            size: 1
+        });
     }
 
-    /**
-     * Update drawing statistics
-     */
-    updateStats() {
-        this.strokeCount.textContent = this.renderer.getStrokeCount();
-        this.vertexCount.textContent = this.renderer.getTotalVertices();
-    }
-
-    /**
-     * Clear canvas
-     */
     clear() {
-        if (confirm('Are you sure you want to clear the entire drawing?')) {
-            this.renderer.clear();
-            this.isDrawing = false;
-            this.lastIndexPosition = null;
-            this.updateStats();
-            console.log('Canvas cleared');
-        }
+        this.strokes.forEach(stroke => {
+            this.group.remove(stroke.mesh);
+            if (stroke.mesh.geometry) {
+                stroke.mesh.geometry.dispose();
+            }
+            if (stroke.mesh.material) {
+                stroke.mesh.material.dispose();
+            }
+        });
+        this.strokes = [];
+        this.currentStroke = null;
     }
 
-    /**
-     * Save drawing
-     */
-    save() {
-        const drawingData = this.renderer.exportDrawing();
+    setBrushColor(color) {
+        this.brushColor = new THREE.Color(color);
+    }
 
-        // Download as JSON
-        const dataStr = JSON.stringify(drawingData, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `drawing-${Date.now()}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+    setBrushSize(size) {
+        this.brushSize = size;
+    }
 
-        // Also save screenshot
-        const imageData = this.renderer.takeScreenshot();
-        const imageLink = document.createElement('a');
-        imageLink.href = imageData;
-        imageLink.download = `drawing-${Date.now()}.png`;
-        imageLink.click();
+    setAutoRotate(enabled) {
+        this.autoRotate = enabled;
+    }
 
-        console.log('✓ Drawing saved');
-        alert('Drawing saved as JSON and PNG!');
+    setRotationSpeed(speed) {
+        this.rotationSpeed = speed * 0.01;
+    }
+
+    render() {
+        requestAnimationFrame(() => this.render());
+
+        if (this.autoRotate) {
+            this.group.rotation.x += this.rotationSpeed * 0.5;
+            this.group.rotation.y += this.rotationSpeed;
+        }
+
+        this.renderer.render(this.scene, this.camera);
+    }
+
+    onWindowResize() {
+        const width = this.canvas.clientWidth;
+        const height = this.canvas.clientHeight;
+
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
+    }
+
+    handToWorldCoordinates(handPos) {
+        if (!handPos) return null;
+
+        const x = (handPos.x - 0.5) * 20;
+        const y = -(handPos.y - 0.5) * 15;
+        const z = (handPos.z || 0) * 5;
+
+        return new THREE.Vector3(x, y, z);
+    }
+
+    getStrokeCount() {
+        return this.strokes.length;
+    }
+
+    getTotalVertices() {
+        let count = 0;
+        this.strokes.forEach(stroke => {
+            if (!stroke.mesh || !stroke.mesh.geometry) return;
+            const attr = stroke.mesh.geometry.getAttribute('position');
+            if (attr) count += attr.count;
+        });
+        return count;
+    }
+
+    takeScreenshot() {
+        return this.canvas.toDataURL('image/png');
+    }
+
+    exportDrawing() {
+        return {
+            timestamp: new Date().toISOString(),
+            strokes: this.strokes.map(stroke => ({
+                type: stroke.type,
+                points: stroke.points,
+                color: stroke.color ? stroke.color.getHexString() : '#ffffff',
+                size: stroke.size
+            }))
+        };
     }
 }
 
-// Initialize app when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('Initializing Gesture Drawing App...');
-    window.app = new GestureDrawingApp();
-    console.log('✓ App initialized. Click "Start Drawing" to begin.');
-});
+window.ThreeDRenderer = ThreeDRenderer;

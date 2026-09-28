@@ -1,255 +1,304 @@
-/**
- * Gesture Detector Module
- * Handles hand detection and gesture recognition using MediaPipe
- */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
-class GestureDetector {
-    constructor() {
-        this.hands = null;
-        this.camera = null;
-        this.isInitialized = false;
-        this.isDetecting = false;
-        this.lastHandPosition = null;
-        this.handLandmarks = null;
-        this.gestures = {
-            indexUp: false,
-            fistClosed: false,
-            thumbUp: false,
-            indexMovement: null
-        };
-    }
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+}
 
-    /**
-     * Initialize MediaPipe Hands
-     */
-    async initialize(videoElement, canvasElement) {
-        try {
-            this.hands = new Hands({
-                locateFile: (file) => {
-                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-                }
-            });
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
 
-            this.hands.setOptions({
-                maxNumHands: 1,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
+header {
+    text-align: center;
+    color: white;
+    margin-bottom: 30px;
+}
 
-            this.hands.onResults((results) => this.onHandsResults(results));
+header h1 {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
 
-            this.camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    await this.hands.send({ image: videoElement });
-                },
-                width: 640,
-                height: 480
-            });
+header p {
+    font-size: 1.1em;
+    opacity: 0.9;
+}
 
-            this.canvasElement = canvasElement;
-            this.videoElement = videoElement;
-            this.isInitialized = true;
+.main-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 30px;
+}
 
-            return true;
-        } catch (error) {
-            console.error('Failed to initialize gesture detector:', error);
-            return false;
-        }
-    }
+.camera-section,
+.canvas-section,
+.controls,
+.info-panel {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
 
-    /**
-     * Start hand detection
-     */
-    async start() {
-        if (!this.isInitialized) {
-            console.error('Gesture detector not initialized');
-            return false;
-        }
+.camera-section,
+.canvas-section {
+    padding: 15px;
+    overflow: hidden;
+}
 
-        try {
-            await this.camera.initialize();
-            this.isDetecting = true;
-            return true;
-        } catch (error) {
-            console.error('Failed to start gesture detection:', error);
-            return false;
-        }
-    }
+.camera-wrapper {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border-radius: 10px;
+    overflow: hidden;
+}
 
-    /**
-     * Stop hand detection
-     */
-    stop() {
-        if (this.camera) {
-            this.camera.stop();
-        }
-        this.isDetecting = false;
-    }
+#webcam {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+}
 
-    /**
-     * Handle MediaPipe hand detection results
-     */
-    onHandsResults(results) {
-        const ctx = this.canvasElement.getContext('2d');
+#canvas-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    transform: scaleX(-1);
+}
 
-        // Set canvas dimensions to match video
-        this.canvasElement.width = this.videoElement.videoWidth;
-        this.canvasElement.height = this.videoElement.videoHeight;
+.hand-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #ff6b6b;
+    padding: 8px 15px;
+    border-radius: 20px;
+    font-size: 0.9em;
+    font-weight: bold;
+    z-index: 10;
+}
 
-        // Clear canvas
-        ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
+.hand-indicator.detected {
+    color: #51cf66;
+}
 
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            this.handLandmarks = results.multiHandLandmarks[0];
-            this.updateGestures();
-            this.drawHand(ctx, results.multiHandLandmarks[0]);
-        } else {
-            this.handLandmarks = null;
-            this.gestures = {
-                indexUp: false,
-                fistClosed: false,
-                thumbUp: false,
-                indexMovement: null
-            };
-        }
-    }
+.canvas-section {
+    position: relative;
+}
 
-    /**
-     * Detect and update gesture states
-     */
-    updateGestures() {
-        if (!this.handLandmarks || this.handLandmarks.length < 21) {
-            return;
-        }
+#3d-canvas {
+    width: 100%;
+    height: 400px;
+    display: block;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+}
 
-        const landmarks = this.handLandmarks;
+.drawing-stats {
+    position: absolute;
+    top: 25px;
+    left: 25px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #ffd700;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    font-weight: bold;
+    z-index: 10;
+}
 
-        // Get key points
-        const indexTip = landmarks[8];      // Index finger tip
-        const indexPIP = landmarks[6];      // Index finger PIP
-        const middleTip = landmarks[12];    // Middle finger tip
-        const ringTip = landmarks[16];      // Ring finger tip
-        const pinkyTip = landmarks[20];     // Pinky finger tip
-        const thumbTip = landmarks[4];      // Thumb tip
-        const palm = landmarks[0];          // Wrist/Palm
+.drawing-stats p {
+    margin: 5px 0;
+}
 
-        // Check if index finger is up
-        this.gestures.indexUp = indexTip.y < indexPIP.y;
+.controls {
+    padding: 25px;
+    margin-bottom: 30px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 15px;
+    align-items: center;
+}
 
-        // Check if fist is closed
-        const fingersExtended = [
-            indexTip.y < indexPIP.y,
-            middleTip.y < landmarks[10].y,
-            ringTip.y < landmarks[14].y,
-            pinkyTip.y < landmarks[18].y
-        ];
-        this.gestures.fistClosed = fingersExtended.filter(e => e).length < 2;
+.tool-modes {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 5px;
+}
 
-        // Check thumb up
-        this.gestures.thumbUp = thumbTip.y < landmarks[3].y;
+.mode-btn,
+.btn {
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
 
-        // Track index finger movement
-        if (this.gestures.indexUp) {
-            const currentPos = { x: indexTip.x, y: indexTip.y, z: indexTip.z };
-            this.gestures.indexMovement = currentPos;
-        }
-    }
+.mode-btn {
+    padding: 10px 18px;
+    background: #e9ecef;
+    color: #333;
+}
 
-    /**
-     * Draw hand landmarks on canvas
-     */
-    drawHand(ctx, landmarks) {
-        // Draw connections
-        const connections = [
-            [0, 1], [1, 2], [2, 3], [3, 4],           // Thumb
-            [0, 5], [5, 6], [6, 7], [7, 8],           // Index
-            [0, 9], [9, 10], [10, 11], [11, 12],      // Middle
-            [0, 13], [13, 14], [14, 15], [15, 16],    // Ring
-            [0, 17], [17, 18], [18, 19], [19, 20]     // Pinky
-        ];
+.mode-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
+}
 
-        // Draw lines
-        ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = 2;
+.btn {
+    padding: 12px 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
 
-        connections.forEach(([start, end]) => {
-            const p1 = landmarks[start];
-            const p2 = landmarks[end];
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
 
-            ctx.beginPath();
-            ctx.moveTo(p1.x * this.canvasElement.width, p1.y * this.canvasElement.height);
-            ctx.lineTo(p2.x * this.canvasElement.width, p2.y * this.canvasElement.height);
-            ctx.stroke();
-        });
+.btn-secondary {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+}
 
-        // Draw circles on landmarks
-        ctx.fillStyle = '#FF0000';
-        landmarks.forEach((landmark, index) => {
-            ctx.beginPath();
-            ctx.arc(
-                landmark.x * this.canvasElement.width,
-                landmark.y * this.canvasElement.height,
-                5,
-                0,
-                2 * Math.PI
-            );
-            ctx.fill();
+.btn-danger {
+    background: #ff6b6b;
+    color: white;
+}
 
-            // Highlight index finger tip
-            if (index === 8) {
-                ctx.strokeStyle = '#00FFFF';
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.arc(
-                    landmark.x * this.canvasElement.width,
-                    landmark.y * this.canvasElement.height,
-                    10,
-                    0,
-                    2 * Math.PI
-                );
-                ctx.stroke();
-            }
-        });
-    }
+.btn-success {
+    background: #51cf66;
+    color: white;
+}
 
-    /**
-     * Get current gesture state
-     */
-    getGestures() {
-        return this.gestures;
-    }
+.btn:hover:not(:disabled),
+.mode-btn:hover {
+    transform: translateY(-2px);
+}
 
-    /**
-     * Get hand landmarks
-     */
-    getHandLandmarks() {
-        return this.handLandmarks;
-    }
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
-    /**
-     * Check if hand is detected
-     */
-    isHandDetected() {
-        return this.handLandmarks !== null;
-    }
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
 
-    /**
-     * Get index finger position in normalized coordinates
-     */
-    getIndexFingerPosition() {
-        if (!this.handLandmarks || this.handLandmarks.length < 9) {
-            return null;
-        }
+.control-group label {
+    font-weight: 600;
+    color: #333;
+    white-space: nowrap;
+}
 
-        const indexTip = this.handLandmarks[8];
-        return {
-            x: indexTip.x,
-            y: indexTip.y,
-            z: indexTip.z
-        };
+.control-group input[type="range"] {
+    flex: 1;
+    cursor: pointer;
+}
+
+.control-group input[type="color"] {
+    width: 50px;
+    height: 40px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.checkbox-wrap {
+    justify-content: center;
+}
+
+.control-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+#brushSizeValue {
+    font-weight: bold;
+    color: #667eea;
+    min-width: 30px;
+}
+
+.info-panel {
+    padding: 25px;
+}
+
+.info-panel h3 {
+    color: #667eea;
+    margin-bottom: 15px;
+    font-size: 1.3em;
+}
+
+.info-panel ul {
+    list-style: none;
+}
+
+.info-panel li {
+    padding: 8px 0;
+    color: #333;
+    border-bottom: 1px solid #eee;
+    font-size: 0.95em;
+}
+
+.info-panel li:before {
+    content: "✓ ";
+    color: #51cf66;
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+.info-panel li:last-child {
+    border-bottom: none;
+}
+
+@media (max-width: 1024px) {
+    .main-content {
+        grid-template-columns: 1fr;
     }
 }
 
-// Export for use
-window.GestureDetector = GestureDetector;
+@media (max-width: 768px) {
+    body {
+        padding: 12px;
+    }
+
+    header h1 {
+        font-size: 1.6em;
+    }
+
+    .controls {
+        grid-template-columns: 1fr;
+    }
+
+    .control-group {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .control-group input[type="range"] {
+        width: 100%;
+    }
+}

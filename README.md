@@ -1,205 +1,232 @@
-# 🎨 3D Gesture Drawing App
+/**
+ * Main Application Controller
+ * Integrates gesture detection with 3D rendering
+ */
 
-A web-based application that allows you to draw in 3D space using hand gestures captured by your webcam. Draw natural 3D strokes by moving your finger in front of the camera.
+class GestureDrawingApp {
+    constructor() {
+        this.gestureDetector = null;
+        this.renderer = null;
+        this.activeMode = 'draw';
+        this.isDrawing = false;
+        this.lastIndexPosition = null;
+        this.drawingEnabled = false;
+        this.minDrawingDistance = 0.02;
+        this.modeButtons = [];
+        this.lastToolTime = 0;
 
-![Status](https://img.shields.io/badge/status-active-success)
-![License](https://img.shields.io/badge/license-MIT-blue)
+        this.initializeElements();
+        this.setupEventListeners();
+    }
 
-## ✨ Features
+    initializeElements() {
+        this.startBtn = document.getElementById('startBtn');
+        this.stopBtn = document.getElementById('stopBtn');
+        this.clearBtn = document.getElementById('clearBtn');
+        this.saveBtn = document.getElementById('saveBtn');
 
-- 🎯 **Real-Time Hand Detection** - Powered by MediaPipe
-- 🎨 **3D Drawing** - Create beautiful 3D strokes with your hand movements
-- 🖌️ **Customizable Brush** - Adjust size and color
-- 💾 **Save Drawings** - Export as PNG & JSON
-- 🔄 **Auto Rotation** - View your 3D art from all angles
-- 📱 **Responsive Design** - Works on desktop and tablets
+        this.brushSizeInput = document.getElementById('brushSize');
+        this.brushSizeValue = document.getElementById('brushSizeValue');
+        this.colorPicker = document.getElementById('colorPicker');
+        this.autoRotateCheckbox = document.getElementById('autoRotate');
+        this.rotationSpeedInput = document.getElementById('rotationSpeed');
 
-## 🚀 Quick Start
+        this.webcamVideo = document.getElementById('webcam');
+        this.canvasOverlay = document.getElementById('canvas-overlay');
+        this.canvas3D = document.getElementById('3d-canvas');
+        this.strokeCount = document.getElementById('strokeCount');
+        this.vertexCount = document.getElementById('vertexCount');
+        this.handIndicator = document.getElementById('handIndicator');
+        this.toolLabel = document.getElementById('toolLabel');
+        this.modeButtons = Array.from(document.querySelectorAll('.mode-btn'));
 
-### Option 1: Direct Usage
-1. Clone the repository
-2. Open `index.html` in your web browser
-3. Allow camera access
-4. Click "Start Drawing"
+        this.gestureDetector = new GestureDetector();
+        this.renderer = new ThreeDRenderer(this.canvas3D);
+    }
 
-```bash
-git clone https://github.com/bham384/gesture-3d-drawing.git
-cd gesture-3d-drawing
-# Open index.html in your browser
-```
+    setupEventListeners() {
+        this.startBtn.addEventListener('click', () => this.start());
+        this.stopBtn.addEventListener('click', () => this.stop());
+        this.clearBtn.addEventListener('click', () => this.clear());
+        this.saveBtn.addEventListener('click', () => this.save());
 
-### Option 2: Local Server (Recommended)
-```bash
-# Using Python 3
-python -m http.server 8000
+        this.brushSizeInput.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            this.renderer.setBrushSize(value);
+            this.brushSizeValue.textContent = value.toFixed(1);
+        });
 
-# Using Node.js
-npx http-server
+        this.colorPicker.addEventListener('input', (e) => {
+            this.renderer.setBrushColor(e.target.value);
+        });
 
-# Then visit http://localhost:8000
-```
+        this.autoRotateCheckbox.addEventListener('change', (e) => {
+            this.renderer.setAutoRotate(e.target.checked);
+        });
 
-## 📖 How to Use
+        this.rotationSpeedInput.addEventListener('input', (e) => {
+            this.renderer.setRotationSpeed(parseFloat(e.target.value));
+        });
 
-1. **Start Detection**: Click "▶ Start Drawing"
-2. **Position Hand**: Hold your hand 1-2 feet from the camera
-3. **Draw**: Keep index finger UP and other fingers DOWN to draw
-4. **Stop**: Close your fist to pause, open to resume
-5. **Customize**: 
-   - Adjust brush size with the slider
-   - Pick a color with the color picker
-   - Control rotation speed
-   - Toggle auto-rotation
-6. **Save**: Click "💾 Save Drawing" to download PNG + JSON
+        this.modeButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                this.setMode(button.dataset.mode);
+            });
+        });
+    }
 
-## 🎮 Gesture Controls
+    setMode(mode) {
+        this.activeMode = mode;
+        this.toolLabel.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
 
-| Gesture | Action |
-|---------|--------|
-| Index finger UP | Drawing mode |
-| Index finger DOWN | Stop drawing |
-| Fist CLOSED | Pause drawing |
-| Fist OPEN | Resume drawing |
+        this.modeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.mode === mode);
+        });
+    }
 
-## 🛠️ Tech Stack
+    async start() {
+        try {
+            const initialized = await this.gestureDetector.initialize(
+                this.webcamVideo,
+                this.canvasOverlay
+            );
 
-- **Hand Detection**: [MediaPipe Hands](https://google.github.io/mediapipe/)
-- **3D Graphics**: [Three.js](https://threejs.org/)
-- **Frontend**: HTML5, CSS3, Vanilla JavaScript
-- **Camera**: WebRTC
+            if (!initialized) {
+                alert('Failed to initialize camera and hand detection');
+                return;
+            }
 
-## 📁 Project Structure
+            const started = await this.gestureDetector.start();
+            if (!started) {
+                alert('Failed to start hand detection');
+                return;
+            }
 
-```
-gesture-3d-drawing/
-├── index.html              # Main HTML file
-├── styles.css              # Application styling
-├── js/
-│   ├── app.js             # Main controller
-│   ├── gesture-detector.js # Hand detection
-│   └── 3d-renderer.js     # 3D rendering
-├── package.json           # Project metadata
-├── README.md              # This file
-└── .gitignore
-```
+            this.drawingEnabled = true;
+            this.startBtn.disabled = true;
+            this.stopBtn.disabled = false;
+            this.monitorGestures();
+        } catch (error) {
+            console.error('Error starting app:', error);
+            alert('Error: ' + error.message);
+        }
+    }
 
-## 🌐 Browser Support
+    stop() {
+        if (this.isDrawing) {
+            this.renderer.endStroke();
+            this.isDrawing = false;
+        }
 
-- ✅ Chrome/Chromium (latest)
-- ✅ Firefox (latest)
-- ✅ Edge (latest)
-- ⚠️ Safari (WebGL required)
+        this.gestureDetector.stop();
+        this.drawingEnabled = false;
+        this.startBtn.disabled = false;
+        this.stopBtn.disabled = true;
+    }
 
-**Requirements:**
-- WebGL support
-- Webcam access
-- Modern JavaScript (ES6)
+    monitorGestures() {
+        if (!this.drawingEnabled) return;
 
-## 💡 Tips for Best Results
+        const gestures = this.gestureDetector.getGestures();
+        const handDetected = this.gestureDetector.isHandDetected();
+        const indexPosition = this.gestureDetector.getIndexFingerPosition();
 
-1. **Good Lighting** - Use natural light or bright room lighting
-2. **Distance** - Keep hand 1-2 feet away from camera
-3. **Smooth Movements** - Make deliberate, slow strokes
-4. **Colors** - Experiment with different brush colors
-5. **Performance** - Close unnecessary browser tabs
+        if (handDetected) {
+            this.handIndicator.textContent = 'Hand Detection: ON';
+            this.handIndicator.classList.add('detected');
+        } else {
+            this.handIndicator.textContent = 'Hand Detection: OFF';
+            this.handIndicator.classList.remove('detected');
+        }
 
-## ⚙️ Customization
+        if (this.activeMode === 'erase') {
+            if (handDetected && gestures.pinch) {
+                this.renderer.eraseLastStroke();
+                this.isDrawing = false;
+                this.lastIndexPosition = null;
+            }
+            this.updateStats();
+            requestAnimationFrame(() => this.monitorGestures());
+            return;
+        }
 
-Edit the following in `js/app.js` for personalization:
+        if (handDetected && indexPosition && gestures.indexUp && !gestures.fistClosed) {
+            const worldPos = this.renderer.handToWorldCoordinates(indexPosition);
+            if (!worldPos) {
+                requestAnimationFrame(() => this.monitorGestures());
+                return;
+            }
 
-```javascript
-// Minimum drawing distance (default: 0.01)
-this.minDrawingDistance = 0.01;
-```
+            if (this.activeMode === 'cube' || this.activeMode === 'sphere') {
+                if (!this.lastIndexPosition) {
+                    this.lastIndexPosition = worldPos.clone();
+                }
 
-Edit in `js/3d-renderer.js`:
+                const distance = worldPos.distanceTo(this.lastIndexPosition);
+                if (distance > 0.4) {
+                    this.renderer.addPrimitive(this.activeMode, worldPos, this.colorPicker.value);
+                    this.lastIndexPosition = worldPos.clone();
+                }
+            } else {
+                if (!this.isDrawing) {
+                    this.renderer.startStroke(worldPos, this.colorPicker.value, this.renderer.brushSize);
+                    this.isDrawing = true;
+                } else if (this.lastIndexPosition) {
+                    const distance = worldPos.distanceTo(this.lastIndexPosition);
+                    if (distance > this.minDrawingDistance) {
+                        this.renderer.addPointToStroke(worldPos);
+                    }
+                }
 
-```javascript
-// Initial brush size (default: 0.5)
-this.brushSize = 0.5;
+                this.lastIndexPosition = worldPos.clone();
+            }
+        } else {
+            if (this.isDrawing) {
+                this.renderer.endStroke();
+                this.isDrawing = false;
+            }
+            this.lastIndexPosition = null;
+        }
 
-// Auto rotation speed (default: 0.01)
-this.rotationSpeed = 0.01;
-```
+        this.updateStats();
+        requestAnimationFrame(() => this.monitorGestures());
+    }
 
-## 🐛 Troubleshooting
+    updateStats() {
+        this.strokeCount.textContent = this.renderer.getStrokeCount();
+        this.vertexCount.textContent = this.renderer.getTotalVertices();
+    }
 
-### Hand not detected?
-- Check camera permissions in browser settings
-- Ensure good lighting conditions
-- Move hand closer to camera
-- Try refreshing the page
+    clear() {
+        if (confirm('Clear the entire drawing?')) {
+            this.renderer.clear();
+            this.isDrawing = false;
+            this.lastIndexPosition = null;
+            this.updateStats();
+        }
+    }
 
-### Slow performance?
-- Close other browser tabs
-- Reduce brush size
-- Disable auto-rotation
-- Check browser console for errors
+    save() {
+        const data = this.renderer.exportDrawing();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const jsonUrl = URL.createObjectURL(blob);
+        const jsonLink = document.createElement('a');
+        jsonLink.href = jsonUrl;
+        jsonLink.download = `drawing-${Date.now()}.json`;
+        jsonLink.click();
+        URL.revokeObjectURL(jsonUrl);
 
-### Camera not working?
-- Check if another app is using the camera
-- Reload the page
-- Try a different browser
-- Check privacy settings
+        const imageData = this.renderer.takeScreenshot();
+        const imageLink = document.createElement('a');
+        imageLink.href = imageData;
+        imageLink.download = `drawing-${Date.now()}.png`;
+        imageLink.click();
 
-## 🎯 Future Enhancements
+        alert('Drawing saved as JSON and PNG!');
+    }
+}
 
-- [ ] Multi-hand support
-- [ ] Undo/Redo functionality
-- [ ] Preset shapes
-- [ ] Animation playback
-- [ ] VR/AR support
-- [ ] Collaborative drawing
-- [ ] Sound effects
-- [ ] Custom brush textures
-
-## 📝 API Reference
-
-### GestureDetector
-
-```javascript
-// Initialize and start
-await detector.initialize(videoElement, canvasElement);
-await detector.start();
-
-// Get data
-const gestures = detector.getGestures();
-const position = detector.getIndexFingerPosition();
-const isDetected = detector.isHandDetected();
-```
-
-### ThreeDRenderer
-
-```javascript
-// Control drawing
-renderer.startStroke(position);
-renderer.addPointToStroke(position);
-renderer.endStroke();
-
-// Settings
-renderer.setBrushColor('#ff0000');
-renderer.setBrushSize(1.0);
-renderer.setAutoRotate(true);
-
-// Export
-const imageData = renderer.takeScreenshot();
-const jsonData = renderer.exportDrawing();
-```
-
-## 📄 License
-
-MIT License - Feel free to use and modify!
-
-## 👤 Author
-
-Created by [@bham384](https://github.com/bham384)
-
-## 🙏 Acknowledgments
-
-- MediaPipe for excellent hand tracking
-- Three.js for powerful 3D graphics
-- Google for inspiring creative ML applications
-
----
-
-**Enjoy creating beautiful 3D art with your gestures!** 🎨✋
+document.addEventListener('DOMContentLoaded', () => {
+    window.app = new GestureDrawingApp();
+    console.log('Gesture app initialized');
+});
