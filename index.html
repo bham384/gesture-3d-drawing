@@ -14,7 +14,6 @@
         </header>
 
         <div class="main-content">
-            <!-- Camera Feed -->
             <div class="camera-section">
                 <div class="camera-wrapper">
                     <video id="webcam" playsinline></video>
@@ -23,10 +22,10 @@
                 </div>
             </div>
 
-            <!-- 3D Canvas -->
             <div class="canvas-section">
                 <canvas id="3d-canvas"></canvas>
                 <div class="drawing-stats" id="drawingStats">
+                    <p>Mode: <span id="toolLabel">Draw</span></p>
                     <p>Strokes: <span id="strokeCount">0</span></p>
                     <p>Vertices: <span id="vertexCount">0</span></p>
                 </div>
@@ -34,11 +33,18 @@
         </div>
 
         <div class="controls">
+            <div class="tool-modes">
+                <button class="mode-btn active" data-mode="draw">✏️ Draw</button>
+                <button class="mode-btn" data-mode="erase">🗑️ Erase</button>
+                <button class="mode-btn" data-mode="cube">🎲 Cube</button>
+                <button class="mode-btn" data-mode="sphere">🔮 Sphere</button>
+            </div>
+
             <button id="startBtn" class="btn btn-primary">▶ Start Drawing</button>
             <button id="stopBtn" class="btn btn-secondary" disabled>⏹ Stop Drawing</button>
             <button id="clearBtn" class="btn btn-danger">🗑 Clear Canvas</button>
             <button id="saveBtn" class="btn btn-success">💾 Save Drawing</button>
-            
+
             <div class="control-group">
                 <label for="brushSize">Brush Size:</label>
                 <input type="range" id="brushSize" min="0.1" max="2" step="0.1" value="0.5">
@@ -55,7 +61,7 @@
                 <input type="range" id="rotationSpeed" min="0" max="1" step="0.1" value="0.5">
             </div>
 
-            <div class="control-group">
+            <div class="control-group checkbox-wrap">
                 <label>
                     <input type="checkbox" id="autoRotate" checked>
                     Auto Rotate
@@ -64,14 +70,13 @@
         </div>
 
         <div class="info-panel">
-            <h3>📖 Instructions</h3>
+            <h3>📖 How to Use</h3>
             <ul>
-                <li>Click "Start Drawing" to enable hand detection</li>
-                <li>Hold up your hand to the camera (1-2 feet away)</li>
-                <li>Keep your <strong>index finger UP</strong> to draw</li>
-                <li>Move your finger to create 3D strokes</li>
-                <li>Close your <strong>fist</strong> to pause drawing</li>
-                <li>Use controls to adjust brush, color, and rotation</li>
+                <li><strong>Draw:</strong> Keep index finger UP to draw smooth 3D strokes</li>
+                <li><strong>Erase:</strong> Pinch thumb + index together to delete the last stroke</li>
+                <li><strong>Cube/Sphere:</strong> Tap to place 3D objects in the scene</li>
+                <li>Keep your hand 1-2 feet away from camera for best results</li>
+                <li>Good lighting improves hand detection accuracy</li>
             </ul>
         </div>
     </div>

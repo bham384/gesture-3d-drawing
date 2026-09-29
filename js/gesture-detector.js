@@ -1,304 +1,219 @@
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+/**
+ * Gesture Detector Module
+ * Handles hand detection and gesture recognition using MediaPipe
+ */
 
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    padding: 20px;
-}
+class GestureDetector {
+    constructor() {
+        this.hands = null;
+        this.camera = null;
+        this.isInitialized = false;
+        this.isDetecting = false;
+        this.handLandmarks = null;
+        this.gestures = {
+            indexUp: false,
+            fistClosed: false,
+            thumbUp: false,
+            pinch: false,
+            openPalm: false,
+            indexMovement: null
+        };
+    }
 
-.container {
-    max-width: 1400px;
-    margin: 0 auto;
-}
+    async initialize(videoElement, canvasElement) {
+        try {
+            this.hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
 
-header {
-    text-align: center;
-    color: white;
-    margin-bottom: 30px;
-}
+            this.hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
 
-header h1 {
-    font-size: 2.5em;
-    margin-bottom: 10px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-}
+            this.hands.onResults((results) => this.onHandsResults(results));
 
-header p {
-    font-size: 1.1em;
-    opacity: 0.9;
-}
+            this.camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await this.hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
 
-.main-content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-bottom: 30px;
-}
+            this.canvasElement = canvasElement;
+            this.videoElement = videoElement;
+            this.isInitialized = true;
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize gesture detector:', error);
+            return false;
+        }
+    }
 
-.camera-section,
-.canvas-section,
-.controls,
-.info-panel {
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 15px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-}
+    async start() {
+        if (!this.isInitialized) {
+            console.error('Gesture detector not initialized');
+            return false;
+        }
 
-.camera-section,
-.canvas-section {
-    padding: 15px;
-    overflow: hidden;
-}
+        try {
+            await this.camera.initialize();
+            this.isDetecting = true;
+            return true;
+        } catch (error) {
+            console.error('Failed to start gesture detection:', error);
+            return false;
+        }
+    }
 
-.camera-wrapper {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    background: #000;
-    border-radius: 10px;
-    overflow: hidden;
-}
+    stop() {
+        if (this.camera) {
+            this.camera.stop();
+        }
+        this.isDetecting = false;
+    }
 
-#webcam {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transform: scaleX(-1);
-}
+    onHandsResults(results) {
+        const ctx = this.canvasElement.getContext('2d');
+        this.canvasElement.width = this.videoElement.videoWidth || 640;
+        this.canvasElement.height = this.videoElement.videoHeight || 480;
+        ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
 
-#canvas-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    transform: scaleX(-1);
-}
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            this.handLandmarks = results.multiHandLandmarks[0];
+            this.updateGestures();
+            this.drawHand(ctx, this.handLandmarks);
+        } else {
+            this.handLandmarks = null;
+            this.gestures = {
+                indexUp: false,
+                fistClosed: false,
+                thumbUp: false,
+                pinch: false,
+                openPalm: false,
+                indexMovement: null
+            };
+        }
+    }
 
-.hand-indicator {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(0, 0, 0, 0.7);
-    color: #ff6b6b;
-    padding: 8px 15px;
-    border-radius: 20px;
-    font-size: 0.9em;
-    font-weight: bold;
-    z-index: 10;
-}
+    updateGestures() {
+        if (!this.handLandmarks || this.handLandmarks.length < 21) {
+            return;
+        }
 
-.hand-indicator.detected {
-    color: #51cf66;
-}
+        const landmarks = this.handLandmarks;
+        const indexTip = landmarks[8];
+        const indexPIP = landmarks[6];
+        const middleTip = landmarks[12];
+        const ringTip = landmarks[16];
+        const pinkyTip = landmarks[20];
+        const thumbTip = landmarks[4];
+        const thumbIP = landmarks[3];
 
-.canvas-section {
-    position: relative;
-}
+        const indexExtended = indexTip.y < indexPIP.y;
+        const middleExtended = middleTip.y < landmarks[10].y;
+        const ringExtended = ringTip.y < landmarks[14].y;
+        const pinkyExtended = pinkyTip.y < landmarks[18].y;
 
-#3d-canvas {
-    width: 100%;
-    height: 400px;
-    display: block;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-}
+        this.gestures.indexUp = indexExtended;
+        this.gestures.fistClosed = !indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+        this.gestures.thumbUp = thumbTip.y < thumbIP.y;
+        this.gestures.openPalm = indexExtended && middleExtended && ringExtended && pinkyExtended;
 
-.drawing-stats {
-    position: absolute;
-    top: 25px;
-    left: 25px;
-    background: rgba(0, 0, 0, 0.72);
-    color: #ffd700;
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 0.9em;
-    font-weight: bold;
-    z-index: 10;
-}
+        const indexThumbDistance = this.distance(thumbTip, indexTip);
+        this.gestures.pinch = indexThumbDistance < 0.06 && indexExtended;
 
-.drawing-stats p {
-    margin: 5px 0;
-}
+        if (indexExtended) {
+            this.gestures.indexMovement = {
+                x: indexTip.x,
+                y: indexTip.y,
+                z: indexTip.z
+            };
+        }
+    }
 
-.controls {
-    padding: 25px;
-    margin-bottom: 30px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 15px;
-    align-items: center;
-}
+    distance(a, b) {
+        return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    }
 
-.tool-modes {
-    grid-column: 1 / -1;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 5px;
-}
+    drawHand(ctx, landmarks) {
+        const connections = [
+            [0, 1], [1, 2], [2, 3], [3, 4],
+            [0, 5], [5, 6], [6, 7], [7, 8],
+            [0, 9], [9, 10], [10, 11], [11, 12],
+            [0, 13], [13, 14], [14, 15], [15, 16],
+            [0, 17], [17, 18], [18, 19], [19, 20]
+        ];
 
-.mode-btn,
-.btn {
-    border: none;
-    border-radius: 8px;
-    font-size: 0.95em;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.25s ease;
-}
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 2;
 
-.mode-btn {
-    padding: 10px 18px;
-    background: #e9ecef;
-    color: #333;
-}
+        connections.forEach(([start, end]) => {
+            const p1 = landmarks[start];
+            const p2 = landmarks[end];
+            ctx.beginPath();
+            ctx.moveTo(p1.x * this.canvasElement.width, p1.y * this.canvasElement.height);
+            ctx.lineTo(p2.x * this.canvasElement.width, p2.y * this.canvasElement.height);
+            ctx.stroke();
+        });
 
-.mode-btn.active {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #fff;
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
-}
+        ctx.fillStyle = '#FF0000';
+        landmarks.forEach((landmark, index) => {
+            ctx.beginPath();
+            ctx.arc(
+                landmark.x * this.canvasElement.width,
+                landmark.y * this.canvasElement.height,
+                5,
+                0,
+                2 * Math.PI
+            );
+            ctx.fill();
 
-.btn {
-    padding: 12px 20px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
+            if (index === 8) {
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(
+                    landmark.x * this.canvasElement.width,
+                    landmark.y * this.canvasElement.height,
+                    10,
+                    0,
+                    2 * Math.PI
+                );
+                ctx.stroke();
+            }
+        });
+    }
 
-.btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
+    getGestures() {
+        return this.gestures;
+    }
 
-.btn-secondary {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    color: white;
-}
+    getHandLandmarks() {
+        return this.handLandmarks;
+    }
 
-.btn-danger {
-    background: #ff6b6b;
-    color: white;
-}
+    isHandDetected() {
+        return this.handLandmarks !== null;
+    }
 
-.btn-success {
-    background: #51cf66;
-    color: white;
-}
+    getIndexFingerPosition() {
+        if (!this.handLandmarks || this.handLandmarks.length < 9) {
+            return null;
+        }
 
-.btn:hover:not(:disabled),
-.mode-btn:hover {
-    transform: translateY(-2px);
-}
-
-.btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.control-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.control-group label {
-    font-weight: 600;
-    color: #333;
-    white-space: nowrap;
-}
-
-.control-group input[type="range"] {
-    flex: 1;
-    cursor: pointer;
-}
-
-.control-group input[type="color"] {
-    width: 50px;
-    height: 40px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
-.checkbox-wrap {
-    justify-content: center;
-}
-
-.control-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-}
-
-#brushSizeValue {
-    font-weight: bold;
-    color: #667eea;
-    min-width: 30px;
-}
-
-.info-panel {
-    padding: 25px;
-}
-
-.info-panel h3 {
-    color: #667eea;
-    margin-bottom: 15px;
-    font-size: 1.3em;
-}
-
-.info-panel ul {
-    list-style: none;
-}
-
-.info-panel li {
-    padding: 8px 0;
-    color: #333;
-    border-bottom: 1px solid #eee;
-    font-size: 0.95em;
-}
-
-.info-panel li:before {
-    content: "✓ ";
-    color: #51cf66;
-    font-weight: bold;
-    margin-right: 8px;
-}
-
-.info-panel li:last-child {
-    border-bottom: none;
-}
-
-@media (max-width: 1024px) {
-    .main-content {
-        grid-template-columns: 1fr;
+        const indexTip = this.handLandmarks[8];
+        return {
+            x: indexTip.x,
+            y: indexTip.y,
+            z: indexTip.z
+        };
     }
 }
 
-@media (max-width: 768px) {
-    body {
-        padding: 12px;
-    }
-
-    header h1 {
-        font-size: 1.6em;
-    }
-
-    .controls {
-        grid-template-columns: 1fr;
-    }
-
-    .control-group {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .control-group input[type="range"] {
-        width: 100%;
-    }
-}
+window.GestureDetector = GestureDetector;

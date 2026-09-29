@@ -1,240 +1,231 @@
 /**
- * 3D Renderer Module
- * Handles Three.js 3D scene, rendering, and stroke drawing
+ * Main Application Controller
+ * Integrates gesture detection with 3D rendering
  */
 
-class ThreeDRenderer {
-    constructor(canvasElement) {
-        this.canvas = canvasElement;
-        this.scene = null;
-        this.camera = null;
+class GestureDrawingApp {
+    constructor() {
+        this.gestureDetector = null;
         this.renderer = null;
-        this.strokes = [];
-        this.currentStroke = null;
-        this.brushColor = new THREE.Color(0xff0000);
-        this.brushSize = 0.5;
-        this.autoRotate = true;
-        this.rotationSpeed = 0.01;
-        this.group = null;
+        this.activeMode = 'draw';
+        this.isDrawing = false;
+        this.lastIndexPosition = null;
+        this.drawingEnabled = false;
+        this.minDrawingDistance = 0.02;
+        this.modeButtons = [];
 
-        this.initialize();
+        this.initializeElements();
+        this.setupEventListeners();
     }
 
-    initialize() {
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x1e3c72);
-        this.scene.fog = new THREE.Fog(0x1e3c72, 1000, 2000);
+    initializeElements() {
+        this.startBtn = document.getElementById('startBtn');
+        this.stopBtn = document.getElementById('stopBtn');
+        this.clearBtn = document.getElementById('clearBtn');
+        this.saveBtn = document.getElementById('saveBtn');
 
-        this.camera = new THREE.PerspectiveCamera(
-            75,
-            this.canvas.clientWidth / this.canvas.clientHeight,
-            0.1,
-            1000
-        );
-        this.camera.position.z = 10;
+        this.brushSizeInput = document.getElementById('brushSize');
+        this.brushSizeValue = document.getElementById('brushSizeValue');
+        this.colorPicker = document.getElementById('colorPicker');
+        this.autoRotateCheckbox = document.getElementById('autoRotate');
+        this.rotationSpeedInput = document.getElementById('rotationSpeed');
 
-        this.renderer = new THREE.WebGLRenderer({
-            canvas: this.canvas,
-            antialias: true,
-            alpha: true
+        this.webcamVideo = document.getElementById('webcam');
+        this.canvasOverlay = document.getElementById('canvas-overlay');
+        this.canvas3D = document.getElementById('3d-canvas');
+        this.strokeCount = document.getElementById('strokeCount');
+        this.vertexCount = document.getElementById('vertexCount');
+        this.handIndicator = document.getElementById('handIndicator');
+        this.toolLabel = document.getElementById('toolLabel');
+        this.modeButtons = Array.from(document.querySelectorAll('.mode-btn'));
+
+        this.gestureDetector = new GestureDetector();
+        this.renderer = new ThreeDRenderer(this.canvas3D);
+    }
+
+    setupEventListeners() {
+        this.startBtn.addEventListener('click', () => this.start());
+        this.stopBtn.addEventListener('click', () => this.stop());
+        this.clearBtn.addEventListener('click', () => this.clear());
+        this.saveBtn.addEventListener('click', () => this.save());
+
+        this.brushSizeInput.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            this.renderer.setBrushSize(value);
+            this.brushSizeValue.textContent = value.toFixed(1);
         });
-        this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
 
-        this.group = new THREE.Group();
-        this.scene.add(this.group);
+        this.colorPicker.addEventListener('input', (e) => {
+            this.renderer.setBrushColor(e.target.value);
+        });
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-        this.scene.add(ambientLight);
+        this.autoRotateCheckbox.addEventListener('change', (e) => {
+            this.renderer.setAutoRotate(e.target.checked);
+        });
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
-        directionalLight.position.set(8, 8, 10);
-        this.scene.add(directionalLight);
+        this.rotationSpeedInput.addEventListener('input', (e) => {
+            this.renderer.setRotationSpeed(parseFloat(e.target.value));
+        });
 
-        const gridHelper = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
-        gridHelper.position.y = -5;
-        this.scene.add(gridHelper);
-
-        window.addEventListener('resize', () => this.onWindowResize());
-        this.render();
+        this.modeButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                this.setMode(button.dataset.mode);
+            });
+        });
     }
 
-    startStroke(position, color, size) {
-        this.currentStroke = {
-            points: [position],
-            color: color || this.brushColor.clone(),
-            size: size || this.brushSize,
-            type: 'stroke'
-        };
+    setMode(mode) {
+        this.activeMode = mode;
+        this.toolLabel.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+
+        this.modeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.mode === mode);
+        });
     }
 
-    addPointToStroke(position) {
-        if (!this.currentStroke) {
-            this.startStroke(position);
+    async start() {
+        try {
+            const initialized = await this.gestureDetector.initialize(
+                this.webcamVideo,
+                this.canvasOverlay
+            );
+
+            if (!initialized) {
+                alert('Failed to initialize camera. Please check camera permissions.');
+                return;
+            }
+
+            const started = await this.gestureDetector.start();
+            if (!started) {
+                alert('Failed to start hand detection');
+                return;
+            }
+
+            this.drawingEnabled = true;
+            this.startBtn.disabled = true;
+            this.stopBtn.disabled = false;
+            this.monitorGestures();
+        } catch (error) {
+            console.error('Error starting app:', error);
+            alert('Error: ' + error.message);
         }
-        this.currentStroke.points.push(position);
     }
 
-    endStroke() {
-        if (!this.currentStroke || this.currentStroke.points.length < 2) {
-            this.currentStroke = null;
+    stop() {
+        if (this.isDrawing) {
+            this.renderer.endStroke();
+            this.isDrawing = false;
+        }
+
+        this.gestureDetector.stop();
+        this.drawingEnabled = false;
+        this.startBtn.disabled = false;
+        this.stopBtn.disabled = true;
+    }
+
+    monitorGestures() {
+        if (!this.drawingEnabled) return;
+
+        const gestures = this.gestureDetector.getGestures();
+        const handDetected = this.gestureDetector.isHandDetected();
+        const indexPosition = this.gestureDetector.getIndexFingerPosition();
+
+        if (handDetected) {
+            this.handIndicator.textContent = 'Hand Detection: ON';
+            this.handIndicator.classList.add('detected');
+        } else {
+            this.handIndicator.textContent = 'Hand Detection: OFF';
+            this.handIndicator.classList.remove('detected');
+        }
+
+        if (this.activeMode === 'erase') {
+            if (handDetected && gestures.pinch) {
+                this.renderer.eraseLastStroke();
+                this.isDrawing = false;
+                this.lastIndexPosition = null;
+            }
+            this.updateStats();
+            requestAnimationFrame(() => this.monitorGestures());
             return;
         }
 
-        const points = this.currentStroke.points;
-        const curve = new THREE.CatmullRomCurve3(points);
-        const radius = this.currentStroke.size * 0.08;
-        const geometry = new THREE.TubeGeometry(curve, Math.max(points.length * 12, 60), radius, 10, false);
-        const material = new THREE.MeshStandardMaterial({
-            color: this.currentStroke.color,
-            metalness: 0.2,
-            roughness: 0.35
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        this.group.add(mesh);
-        this.strokes.push({
-            mesh,
-            type: 'stroke',
-            color: this.currentStroke.color,
-            points: points.slice(),
-            size: this.currentStroke.size
-        });
-
-        this.currentStroke = null;
-    }
-
-    eraseLastStroke() {
-        if (!this.strokes.length) return;
-        const last = this.strokes.pop();
-        if (last && last.mesh) {
-            this.group.remove(last.mesh);
-            last.mesh.geometry.dispose();
-            if (last.mesh.material) {
-                last.mesh.material.dispose();
+        if (handDetected && indexPosition && gestures.indexUp && !gestures.fistClosed) {
+            const worldPos = this.renderer.handToWorldCoordinates(indexPosition);
+            if (!worldPos) {
+                requestAnimationFrame(() => this.monitorGestures());
+                return;
             }
+
+            if (this.activeMode === 'cube' || this.activeMode === 'sphere') {
+                if (!this.lastIndexPosition) {
+                    this.lastIndexPosition = worldPos.clone();
+                }
+
+                const distance = worldPos.distanceTo(this.lastIndexPosition);
+                if (distance > 0.4) {
+                    this.renderer.addPrimitive(this.activeMode, worldPos, this.colorPicker.value);
+                    this.lastIndexPosition = worldPos.clone();
+                }
+            } else {
+                if (!this.isDrawing) {
+                    this.renderer.startStroke(worldPos, this.colorPicker.value, this.renderer.brushSize);
+                    this.isDrawing = true;
+                } else if (this.lastIndexPosition) {
+                    const distance = worldPos.distanceTo(this.lastIndexPosition);
+                    if (distance > this.minDrawingDistance) {
+                        this.renderer.addPointToStroke(worldPos);
+                    }
+                }
+
+                this.lastIndexPosition = worldPos.clone();
+            }
+        } else {
+            if (this.isDrawing) {
+                this.renderer.endStroke();
+                this.isDrawing = false;
+            }
+            this.lastIndexPosition = null;
         }
+
+        this.updateStats();
+        requestAnimationFrame(() => this.monitorGestures());
     }
 
-    addPrimitive(type, position, color) {
-        const finalColor = color || this.brushColor.clone();
-        let geometry;
-        let mesh;
-
-        if (type === 'cube') {
-            geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-        } else {
-            geometry = new THREE.SphereGeometry(0.8, 24, 24);
-        }
-
-        const material = new THREE.MeshStandardMaterial({
-            color: finalColor,
-            metalness: 0.35,
-            roughness: 0.25
-        });
-
-        mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(position);
-        this.group.add(mesh);
-
-        this.strokes.push({
-            mesh,
-            type,
-            color: finalColor,
-            points: [position.clone()],
-            size: 1
-        });
+    updateStats() {
+        this.strokeCount.textContent = this.renderer.getStrokeCount();
+        this.vertexCount.textContent = this.renderer.getTotalVertices();
     }
 
     clear() {
-        this.strokes.forEach(stroke => {
-            this.group.remove(stroke.mesh);
-            if (stroke.mesh.geometry) {
-                stroke.mesh.geometry.dispose();
-            }
-            if (stroke.mesh.material) {
-                stroke.mesh.material.dispose();
-            }
-        });
-        this.strokes = [];
-        this.currentStroke = null;
-    }
-
-    setBrushColor(color) {
-        this.brushColor = new THREE.Color(color);
-    }
-
-    setBrushSize(size) {
-        this.brushSize = size;
-    }
-
-    setAutoRotate(enabled) {
-        this.autoRotate = enabled;
-    }
-
-    setRotationSpeed(speed) {
-        this.rotationSpeed = speed * 0.01;
-    }
-
-    render() {
-        requestAnimationFrame(() => this.render());
-
-        if (this.autoRotate) {
-            this.group.rotation.x += this.rotationSpeed * 0.5;
-            this.group.rotation.y += this.rotationSpeed;
+        if (confirm('Clear the entire drawing?')) {
+            this.renderer.clear();
+            this.isDrawing = false;
+            this.lastIndexPosition = null;
+            this.updateStats();
         }
-
-        this.renderer.render(this.scene, this.camera);
     }
 
-    onWindowResize() {
-        const width = this.canvas.clientWidth;
-        const height = this.canvas.clientHeight;
+    save() {
+        const data = this.renderer.exportDrawing();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const jsonUrl = URL.createObjectURL(blob);
+        const jsonLink = document.createElement('a');
+        jsonLink.href = jsonUrl;
+        jsonLink.download = `drawing-${Date.now()}.json`;
+        jsonLink.click();
+        URL.revokeObjectURL(jsonUrl);
 
-        this.camera.aspect = width / height;
-        this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height);
-    }
+        const imageData = this.renderer.takeScreenshot();
+        const imageLink = document.createElement('a');
+        imageLink.href = imageData;
+        imageLink.download = `drawing-${Date.now()}.png`;
+        imageLink.click();
 
-    handToWorldCoordinates(handPos) {
-        if (!handPos) return null;
-
-        const x = (handPos.x - 0.5) * 20;
-        const y = -(handPos.y - 0.5) * 15;
-        const z = (handPos.z || 0) * 5;
-
-        return new THREE.Vector3(x, y, z);
-    }
-
-    getStrokeCount() {
-        return this.strokes.length;
-    }
-
-    getTotalVertices() {
-        let count = 0;
-        this.strokes.forEach(stroke => {
-            if (!stroke.mesh || !stroke.mesh.geometry) return;
-            const attr = stroke.mesh.geometry.getAttribute('position');
-            if (attr) count += attr.count;
-        });
-        return count;
-    }
-
-    takeScreenshot() {
-        return this.canvas.toDataURL('image/png');
-    }
-
-    exportDrawing() {
-        return {
-            timestamp: new Date().toISOString(),
-            strokes: this.strokes.map(stroke => ({
-                type: stroke.type,
-                points: stroke.points,
-                color: stroke.color ? stroke.color.getHexString() : '#ffffff',
-                size: stroke.size
-            }))
-        };
+        alert('Drawing saved as JSON and PNG!');
     }
 }
 
-window.ThreeDRenderer = ThreeDRenderer;
+document.addEventListener('DOMContentLoaded', () => {
+    window.app = new GestureDrawingApp();
+    console.log('Gesture drawing app initialized successfully');
+});
